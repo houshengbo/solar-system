@@ -4,44 +4,41 @@ import (
 	"context"
 	"fmt"
 	"go.uber.org/zap"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/kubernetes"
-	"knative.dev/pkg/logging/logkey"
 	"reflect"
+	"strconv"
+
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/client-go/tools/cache"
-
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/kubernetes"
+	"knative.dev/pkg/logging/logkey"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	appsv1listers "k8s.io/client-go/listers/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	clientset "my.dev/solar-system/pkg/client/clientset/versioned"
+	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/reconciler"
-	"knative.dev/pkg/tracker"
 	samplesv1alpha1 "my.dev/solar-system/pkg/apis/solar/v1alpha1"
 	listers "my.dev/solar-system/pkg/client/listers/solar/v1alpha1"
-	"knative.dev/pkg/controller"
+	clientset "my.dev/solar-system/pkg/client/clientset/versioned"
 )
 
 const(
 	ImagePath = "docker.io/houshengbo/energy-source:latest"
+	TargetPortNum = 8080
+	PortNum = 80
 )
 
 // Reconciler implements controller.Reconciler for Star resources.
 type Reconciler struct {
-	// Tracker builds an index of what resources are watching other resources
-	// so that we can immediately react to changes tracked resources.
-	Tracker tracker.Interface
-
 	KubeClientSet kubernetes.Interface
 	starClient clientset.Interface
-	// Listers index properties about resources
 	deploymentLister    appsv1listers.DeploymentLister
 	starLister listers.StarLister
-
 }
 
 // Check that our Reconciler implements Interface
@@ -67,7 +64,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, key string) error {
 	// Don't modify the informers copy.
 	star := original.DeepCopy()
 
-	// Reconcile this copy of the KnativeEventing resource and then write back any status
+	// Reconcile this copy of the Star resource and then write back any status
 	// updates regardless of whether the reconciliation errored out.
 	reconcileErr := r.ReconcileKind(ctx, star)
 	if equality.Semantic.DeepEqual(original.Status, star.Status) {
@@ -100,12 +97,11 @@ func (r *Reconciler) updateStatus(desired *samplesv1alpha1.Star) (*samplesv1alph
 	return r.starClient.ExampleV1alpha1().Stars(desired.Namespace).UpdateStatus(existing)
 }
 
-
 // ReconcileKind implements Interface.ReconcileKind.
 func (r *Reconciler) ReconcileKind(ctx context.Context, o *samplesv1alpha1.Star) reconciler.Event {
 	if o.GetDeletionTimestamp() != nil {
 		logger := logging.FromContext(ctx)
-		logger.Info("The sun is removed.")
+		logger.Info("The sun is removed with the source of energy.")
 		// Check for a DeletionTimestamp.  If present, elide the normal reconcile logic.
 		// When a controller needs finalizer handling, it would go here.
 		return nil
@@ -146,6 +142,9 @@ func (r *Reconciler) reconcileDeployment(ctx context.Context, star *samplesv1alp
 		if err != nil {
 			return fmt.Errorf("failed to update deployment %q: %w", deploymentName, err)
 		}
+		if _, err = r.createService(ctx, star, r.newService(star, deploymentName)); err != nil {
+			return fmt.Errorf("failed to launch the service for the depliyment %q: %w", deploymentName, err)
+		}
 	}
 
 	logger.Info("The sun is ready with the source of energy.")
@@ -158,8 +157,7 @@ func (r *Reconciler) createDeployment(ctx context.Context, deployment *appsv1.De
 
 func (r *Reconciler) newDeployment(star *samplesv1alpha1.Star, name string) *appsv1.Deployment {
 	labels := map[string]string{
-		"app":        "source-of-energy",
-		"controller": name,
+		"run": "source-of-energy",
 	}
 	replicas := int32(1)
 	return &appsv1.Deployment{
@@ -188,6 +186,16 @@ func (r *Reconciler) newDeployment(star *samplesv1alpha1.Star, name string) *app
 						{
 							Name:  name,
 							Image: ImagePath,
+							Env: []corev1.EnvVar{
+								corev1.EnvVar{
+									Name:  "SOURCE",
+									Value: star.Name,
+								},
+								corev1.EnvVar{
+									Name:  "PORT",
+									Value: strconv.Itoa(TargetPortNum),
+								},
+							},
 						},
 					},
 				},
@@ -209,9 +217,6 @@ func (r *Reconciler) checkDeployment(ctx context.Context, star *samplesv1alpha1.
 	deployment, err := r.KubeClientSet.AppsV1().Deployments(deployment.GetNamespace()).Get(deployment.GetName(), metav1.GetOptions{})
 	if err != nil {
 		star.Status.MarkDeploymentUnavailable(deployment.Name)
-		if apierrs.IsNotFound(err) {
-			return deployment, nil
-		}
 		return deployment, err
 	}
 	if !available(deployment) {
@@ -219,6 +224,53 @@ func (r *Reconciler) checkDeployment(ctx context.Context, star *samplesv1alpha1.
 		return deployment, nil
 	}
 
-	star.Status.MarkStarReady()
 	return deployment, nil
+}
+
+func (r *Reconciler) newService(star *samplesv1alpha1.Star, name string) *corev1.Service {
+	labels := map[string]string{
+		"run": "source-of-energy",
+	}
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: star.Namespace,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(star, schema.GroupVersionKind{
+					Group:   samplesv1alpha1.SchemeGroupVersion.Group,
+					Version: samplesv1alpha1.SchemeGroupVersion.Version,
+					Kind:    "Star",
+				}),
+			},
+			Labels: labels,
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{
+				"run": "source-of-energy",
+			},
+			Ports: []corev1.ServicePort{
+				{
+					Protocol:   corev1.ProtocolTCP,
+					Port:       PortNum,
+					TargetPort: intstr.FromInt(TargetPortNum),
+				},
+			},
+			Type: corev1.ServiceTypeNodePort,
+		},
+	}
+}
+
+func (r *Reconciler) createService(ctx context.Context, star *samplesv1alpha1.Star,
+	service *corev1.Service) (*corev1.Service, error) {
+	ser, err := r.KubeClientSet.CoreV1().Services(service.GetNamespace()).Get(service.GetName(), metav1.GetOptions{})
+	if err != nil {
+		if apierrs.IsNotFound(err) {
+			return r.KubeClientSet.CoreV1().Services(service.GetNamespace()).Create(service)
+		}
+		star.Status.MarkDeploymentUnavailable(ser.Name)
+		return ser, err
+	}
+
+	star.Status.MarkStarReady()
+	return ser, nil
 }

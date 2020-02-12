@@ -18,7 +18,7 @@ func getSource() string {
 func handler(w http.ResponseWriter, r *http.Request) {
 	log.Print("Source of energy: received a request")
 	source := getSource()
-	log.Printf("Hello! This is the source of energy for the %s, providing heat and light.\n", source)
+	fmt.Fprintf(w, "Hello! This is the source of energy for the %s, providing heat and light.\n", source)
 }
 
 func main() {

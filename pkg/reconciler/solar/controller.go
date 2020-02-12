@@ -4,7 +4,6 @@ import (
 	"context"
 	"k8s.io/client-go/tools/cache"
 
-	"knative.dev/pkg/tracker"
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
@@ -21,10 +20,8 @@ func NewController(
 	cmw configmap.Watcher,
 ) *controller.Impl {
 	logger := logging.FromContext(ctx)
-
 	starInformer := starinformer.Get(ctx)
 	deploymentInformer := deploymentinformer.Get(ctx)
-
 	r := &Reconciler{
 		deploymentLister: deploymentInformer.Lister(),
 		starLister: starInformer.Lister(),
@@ -32,16 +29,11 @@ func NewController(
 		KubeClientSet: kubeclient.Get(ctx),
 	}
 	impl := controller.NewImpl(r, logger, "Star")
-	r.Tracker = tracker.New(impl.EnqueueKey, controller.GetTrackerLease(ctx))
-
 	logger.Info("Setting up event handlers.")
-
 	starInformer.Informer().AddEventHandler(controller.HandleAll(impl.Enqueue))
-
 	deploymentInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: controller.Filter(v1alpha1.SchemeGroupVersion.WithKind("Star")),
 		Handler:    controller.HandleAll(impl.EnqueueControllerOf),
 	})
-
 	return impl
 }
