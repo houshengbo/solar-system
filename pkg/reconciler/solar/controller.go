@@ -8,6 +8,7 @@ import (
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
+	kubeclient "knative.dev/pkg/client/injection/kube/client"
 	deploymentinformer "knative.dev/pkg/client/injection/kube/informers/apps/v1/deployment"
 	starclient "my.dev/solar-system/pkg/client/injection/client"
 	"my.dev/solar-system/pkg/apis/solar/v1alpha1"
@@ -28,6 +29,7 @@ func NewController(
 		deploymentLister: deploymentInformer.Lister(),
 		starLister: starInformer.Lister(),
 		starClient: starclient.Get(ctx),
+		KubeClientSet: kubeclient.Get(ctx),
 	}
 	impl := controller.NewImpl(r, logger, "Star")
 	r.Tracker = tracker.New(impl.EnqueueKey, controller.GetTrackerLease(ctx))

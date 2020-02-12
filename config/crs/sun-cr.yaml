@@ -2,6 +2,7 @@ apiVersion: "example.crd.com/v1alpha1"
 kind: "Star"
 metadata:
   name: "sun"
+  namespace: solar-examples
 spec:
   type: "G"
   location: "Galaxy"
