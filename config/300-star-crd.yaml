@@ -10,6 +10,8 @@ spec:
     listKind: StarList
     plural: stars
     singular: star
+  subresources:
+    status: {}
   validation:
     openAPIV3Schema:
       required: ["spec"]

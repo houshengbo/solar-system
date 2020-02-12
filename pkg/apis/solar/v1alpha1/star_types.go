@@ -13,7 +13,6 @@ const (
 )
 
 // +genclient
-// +genreconciler
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // Star is a the basic unit to form the solar system.

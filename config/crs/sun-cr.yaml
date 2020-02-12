@@ -1,5 +1,5 @@
-apiVersion: "example.crd.com/v1alpha1
-"kind: "Star"
+apiVersion: "example.crd.com/v1alpha1"
+kind: "Star"
 metadata:
   name: "sun"
 spec:

@@ -40,9 +40,13 @@ required = [
   name = "knative.dev/pkg"
   branch = "master"
 
-[[override]]
-  name = "google.golang.org/genproto"
-  revision = "e7d98fc518a78c9f8b5ee77be7b0b317475d89e1"
+#[[override]]
+#  name = "cloud.google.com/go"
+#  revision = "v0.39.0"
+
+#[[override]]
+#  name = "google.golang.org/genproto"
+#  revision = "e7d98fc518a78c9f8b5ee77be7b0b317475d89e1"
 
 [[override]]
   name = "go.opencensus.io"

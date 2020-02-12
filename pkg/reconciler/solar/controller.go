@@ -2,81 +2,44 @@ package solar
 
 import (
 	"context"
+	"k8s.io/client-go/tools/cache"
 
-	corev1 "k8s.io/api/core/v1"
-	apierrs "k8s.io/apimachinery/pkg/api/errors"
-	appsv1listers "k8s.io/client-go/listers/apps/v1"
-
-	"knative.dev/pkg/logging"
-	"knative.dev/pkg/reconciler"
 	"knative.dev/pkg/tracker"
-	samplesv1alpha1 "my.dev/solar-system/pkg/apis/solar/v1alpha1"
-	starreconciler "my.dev/solar-system/pkg/client/injection/reconciler/solar/v1alpha1/star"
+	"knative.dev/pkg/configmap"
+	"knative.dev/pkg/controller"
+	"knative.dev/pkg/logging"
+	deploymentinformer "knative.dev/pkg/client/injection/kube/informers/apps/v1/deployment"
+	starclient "my.dev/solar-system/pkg/client/injection/client"
+	"my.dev/solar-system/pkg/apis/solar/v1alpha1"
+	starinformer "my.dev/solar-system/pkg/client/injection/informers/solar/v1alpha1/star"
 )
 
-// newReconciledNormal makes a new reconciler event with event type Normal, and
-// reason StarReconciled.
-func newReconciledNormal(namespace, name string) reconciler.Event {
-	return reconciler.NewEvent(corev1.EventTypeNormal, "StarReconciled", "Star reconciled: \"%s/%s\"", namespace, name)
-}
-
-// Reconciler implements addressableservicereconciler.Interface for
-// AddressableService resources.
-type Reconciler struct {
-	// Tracker builds an index of what resources are watching other resources
-	// so that we can immediately react to changes tracked resources.
-	Tracker tracker.Interface
-
-	// Listers index properties about resources
-	deploymentLister    appsv1listers.DeploymentLister
-}
-
-// Check that our Reconciler implements Interface
-var _ starreconciler.Interface = (*Reconciler)(nil)
-
-// ReconcileKind implements Interface.ReconcileKind.
-func (r *Reconciler) ReconcileKind(ctx context.Context, o *samplesv1alpha1.Star) reconciler.Event {
-	if o.GetDeletionTimestamp() != nil {
-		logger := logging.FromContext(ctx)
-		logger.Info("The sun is removed.")
-		// Check for a DeletionTimestamp.  If present, elide the normal reconcile logic.
-		// When a controller needs finalizer handling, it would go here.
-		return nil
-	}
-	o.Status.InitializeConditions()
-
-	if err := r.reconcileDeployment(ctx, o); err != nil {
-		return err
-	}
-
-	o.Status.ObservedGeneration = o.Generation
-	return newReconciledNormal(o.Namespace, o.Name)
-}
-
-func (r *Reconciler) reconcileDeployment(ctx context.Context, asvc *samplesv1alpha1.Star) error {
+// NewController creates a Reconciler and returns the result of NewImpl.
+func NewController(
+	ctx context.Context,
+	cmw configmap.Watcher,
+) *controller.Impl {
 	logger := logging.FromContext(ctx)
-	//
-	//if err := r.Tracker.TrackReference(tracker.Reference{
-	//	APIVersion: "v1",
-	//	Kind:       "Service",
-	//	Name:       asvc.Spec.Location,
-	//	Namespace:  asvc.Namespace,
-	//}, asvc); err != nil {
-	//	logger.Errorf("Error tracking service %s: %v", asvc.Spec.Location, err)
-	//	return err
-	//}
-	//
-	//_, err := r.ServiceLister.Services(asvc.Namespace).Get(asvc.Spec.Location)
-	//if apierrs.IsNotFound(err) {
-	//	logger.Info("Service does not yet exist:", asvc.Spec.Location)
-	//	asvc.Status.MarkServiceUnavailable(asvc.Spec.Location)
-	//	return nil
-	//} else if err != nil {
-	//	logger.Errorf("Error reconciling service %s: %v", asvc.Spec.Location, err)
-	//	return err
-	//}
 
-	logger.Info("The sun is created.")
-	asvc.Status.MarkStarReady()
-	return nil
+	starInformer := starinformer.Get(ctx)
+	deploymentInformer := deploymentinformer.Get(ctx)
+
+	r := &Reconciler{
+		deploymentLister: deploymentInformer.Lister(),
+		starLister: starInformer.Lister(),
+		starClient: starclient.Get(ctx),
+	}
+	impl := controller.NewImpl(r, logger, "Star")
+	r.Tracker = tracker.New(impl.EnqueueKey, controller.GetTrackerLease(ctx))
+
+	logger.Info("Setting up event handlers.")
+
+	starInformer.Informer().AddEventHandler(controller.HandleAll(impl.Enqueue))
+
+	deploymentInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
+		FilterFunc: controller.Filter(v1alpha1.SchemeGroupVersion.WithKind("Star")),
+		Handler:    controller.HandleAll(impl.EnqueueControllerOf),
+	})
+
+	return impl
 }
