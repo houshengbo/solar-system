@@ -3,9 +3,17 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	duckv1 "knative.dev/pkg/apis/duck/v1"
+
+	"knative.dev/pkg/apis"
+)
+
+const (
+	CreationSucceeded     apis.ConditionType = "CreationSucceeded"
+	DeploymentsAvailable  apis.ConditionType = "DeploymentsAvailable"
 )
 
 // +genclient
+// +genreconciler
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // Star is a the basic unit to form the solar system.
